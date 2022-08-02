@@ -199,6 +199,7 @@ class Response;
 namespace Web::FileAPI {
 class Blob;
 class File;
+class FileReaderSync;
 }
 
 namespace Web::Geometry {
