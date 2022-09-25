@@ -22,6 +22,8 @@ public:
 
     static WebIDL::ExceptionOr<JS::NonnullGCPtr<FileReaderSync>> construct_impl(JS::Realm&);
 
+    WebIDL::ExceptionOr<JS::NonnullGCPtr<JS::ArrayBuffer>> read_as_array_buffer(Blob& blob);
+
 private:
     explicit FileReaderSync(JS::Realm&);
 };

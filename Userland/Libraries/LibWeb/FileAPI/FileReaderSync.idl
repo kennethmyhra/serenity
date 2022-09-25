@@ -4,7 +4,7 @@ interface FileReaderSync {
     constructor();
     // Synchronously return strings
 
-    // FIXME: ArrayBuffer readAsArrayBuffer(Blob blob);
+    ArrayBuffer readAsArrayBuffer(Blob blob);
     // FIXME: DOMString readAsBinaryString(Blob blob);
     // FIXME: DOMString readAsText(Blob blob, optional DOMString encoding);
     // FIXME: DOMString readAsDataURL(Blob blob);
