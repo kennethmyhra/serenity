@@ -234,6 +234,7 @@ class AsyncGeneratorPrototype;
 class GeneratorPrototype;
 class WrapForValidIteratorPrototype;
 
+class TypedArrayBase;
 class TypedArrayConstructor;
 class TypedArrayPrototype;
 

@@ -174,7 +174,10 @@ CppType idl_type_name_to_cpp_type(Type const& type, Interface const& interface)
         return { .name = "JS::Handle<JS::Object>", .sequence_storage_type = SequenceStorageType::Vector };
 
     if (type.name() == "BufferSource")
-        return { .name = "JS::Handle<JS::Object>", .sequence_storage_type = SequenceStorageType::MarkedVector };
+        return { .name = "JS::Handle<WebIDL::BufferSource>", .sequence_storage_type = SequenceStorageType::MarkedVector };
+
+    if (type.name() == "ArrayBufferView")
+        return { .name = "JS::Handle<WebIDL::ArrayBufferView>", .sequence_storage_type = SequenceStorageType::MarkedVector };
 
     if (type.name() == "File")
         return { .name = "JS::Handle<FileAPI::File>", .sequence_storage_type = SequenceStorageType::MarkedVector };
@@ -656,7 +659,7 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
     auto @cpp_name@ = JS::make_handle(TRY(@js_name@@js_suffix@.to_object(vm)));
 )~~~");
         }
-    } else if (parameter.type->name() == "BufferSource" || parameter.type->name() == "Float32Array" || parameter.type->name() == "Float64Array") {
+    } else if (parameter.type->name() == "Float32Array" || parameter.type->name() == "Float64Array") {
         if (optional) {
             scoped_generator.append(R"~~~(
     Optional<JS::Handle<JS::Object>> @cpp_name@;
@@ -673,6 +676,50 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
 
     // TODO: Should we make this a Variant?
     @cpp_name@ = JS::make_handle(&@js_name@@js_suffix@.as_object());
+)~~~");
+        if (optional) {
+            scoped_generator.append(R"~~~(
+        }
+)~~~");
+        }
+    } else if (parameter.type->name() == "BufferSource") {
+        if (optional) {
+            scoped_generator.append(R"~~~(
+    Optional<JS::Handle<WebIDL::BufferSource>> @cpp_name@;
+    if (!@js_name@@js_suffix@.is_undefined()) {
+)~~~");
+        } else {
+            scoped_generator.append(R"~~~(
+    JS::Handle<WebIDL::BufferSource> @cpp_name@;
+)~~~");
+        }
+        scoped_generator.append(R"~~~(
+    if (!@js_name@@js_suffix@.is_object() || !(is<JS::TypedArrayBase>(@js_name@@js_suffix@.as_object()) || is<JS::DataView>(@js_name@@js_suffix@.as_object())))
+        return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObjectOfType, "@parameter.type.name@");
+
+    @cpp_name@ = JS::make_handle(vm.heap().allocate<WebIDL::BufferSource>(realm, realm, @js_name@@js_suffix@.as_object()));
+)~~~");
+        if (optional) {
+            scoped_generator.append(R"~~~(
+        }
+)~~~");
+        }
+    } else if (parameter.type->name() == "ArrayBufferView") {
+        if (optional) {
+            scoped_generator.append(R"~~~(
+    Optional<JS::Handle<WebIDL::ArrayBufferView>> @cpp_name@;
+    if (!@js_name@@js_suffix@.is_undefined()) {
+)~~~");
+        } else {
+            scoped_generator.append(R"~~~(
+    JS::Handle<WebIDL::ArrayBufferView> @cpp_name@;
+)~~~");
+        }
+        scoped_generator.append(R"~~~(
+    if (!@js_name@@js_suffix@.is_object() || !(is<JS::TypedArrayBase>(@js_name@@js_suffix@.as_object()) || is<JS::DataView>(@js_name@@js_suffix@.as_object())))
+        return vm.throw_completion<JS::TypeError>(JS::ErrorType::NotAnObjectOfType, "@parameter.type.name@");
+
+    @cpp_name@ = JS::make_handle(vm.heap().allocate<WebIDL::ArrayBufferView>(realm, realm, @js_name@@js_suffix@.as_object()));
 )~~~");
         if (optional) {
             scoped_generator.append(R"~~~(
@@ -1157,28 +1204,40 @@ static void generate_to_cpp(SourceGenerator& generator, ParameterType& parameter
 
         // 6. If Type(V) is Object and V has an [[ArrayBufferData]] internal slot, then
         //    1. If types includes ArrayBuffer, then return the result of converting V to ArrayBuffer.
-        for (auto& type : types) {
-            if (type->name() == "BufferSource") {
-                union_generator.append(R"~~~(
-            if (is<JS::TypedArrayBase>(@js_name@@js_suffix@_object) || is<JS::ArrayBuffer>(@js_name@@js_suffix@_object) || is<JS::DataView>(@js_name@@js_suffix@_object))
-                return JS::make_handle(@js_name@@js_suffix@_object);
-)~~~");
-            }
-        }
         //    2. If types includes object, then return the IDL value that is a reference to the object V.
-        if (includes_object) {
+        if (any_of(types, [](auto const& type) { return type->name() == "ArrayBuffer"; }) || includes_object) {
             union_generator.append(R"~~~(
-            return @js_name@@js_suffix@_object;
+            if (is<JS::ArrayBuffer>(@js_name@@js_suffix@_object))
+                return JS::make_handle(@js_name@@js_suffix@_object);
+        }
 )~~~");
         }
 
-        // FIXME: 7. If Type(V) is Object and V has a [[DataView]] internal slot, then:
-        //           1. If types includes DataView, then return the result of converting V to DataView.
-        //           2. If types includes object, then return the IDL value that is a reference to the object V.
+        // 7. If Type(V) is Object and V has a [[DataView]] internal slot, then:
+        //    1. If types includes DataView, then return the result of converting V to DataView.
+        //    2. If types includes object, then return the IDL value that is a reference to the object V.
+        if (any_of(types, [](auto const& type) { return type->name() == "DataView"; }) || includes_object) {
+            union_generator.append(R"~~~(
+            if (is<JS::DataView>(@js_name@@js_suffix@_object))
+                return JS::make_handle(@js_name@@js_suffix@_object);
+        }
+)~~~");
+        }
 
-        // FIXME: 8. If Type(V) is Object and V has a [[TypedArrayName]] internal slot, then:
-        //           1. If types includes a typed array type whose name is the value of V’s [[TypedArrayName]] internal slot, then return the result of converting V to that type.
-        //           2. If types includes object, then return the IDL value that is a reference to the object V.
+        // 8. If Type(V) is Object and V has a [[TypedArrayName]] internal slot, then:
+        //    1. If types includes a typed array type whose name is the value of V’s [[TypedArrayName]] internal slot, then return the result of converting V to that type.
+        //    2. If types includes object, then return the IDL value that is a reference to the object V.
+        auto has_typed_array_name = any_of(types, [](auto const& type) {
+            return type->name().is_one_of("Int8Array"sv, "Int16Array"sv, "Int32Array"sv, "Uint8Array"sv, "Uint16Array"sv, "Uint32Array"sv, "Uint8ClampedArray"sv, "BigInt64Array"sv, "BigUint64Array", "Float32Array"sv, "Float64Array"sv);
+        });
+
+        if (has_typed_array_name || includes_object) {
+            union_generator.append(R"~~~(
+            if (is<JS::TypedArrayBase>(@js_name@@js_suffix@_object))
+                return JS::make_handle(@js_name@@js_suffix@_object);
+        }
+)~~~");
+        }
 
         // 9. If IsCallable(V) is true, then:
         //     1. If types includes a callback function type, then return the result of converting V to that callback function type.
@@ -3258,6 +3317,7 @@ void generate_namespace_implementation(IDL::Interface const& interface, StringBu
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/WindowProxy.h>
+#include <LibWeb/WebIDL/Buffers.h>
 #include <LibWeb/WebIDL/OverloadResolution.h>
 
 )~~~");
@@ -3462,6 +3522,7 @@ void generate_constructor_implementation(IDL::Interface const& interface, String
 #    include <LibWeb/URL/@name@.h>
 #endif
 #include <LibWeb/WebIDL/CallbackType.h>
+#include <LibWeb/WebIDL/Buffers.h>
 
 )~~~");
 
@@ -3822,6 +3883,7 @@ void generate_prototype_implementation(IDL::Interface const& interface, StringBu
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/WindowProxy.h>
+#include <LibWeb/WebIDL/Buffers.h>
 #include <LibWeb/WebIDL/OverloadResolution.h>
 
 #if __has_include(<LibWeb/Bindings/@prototype_base_class@.h>)
