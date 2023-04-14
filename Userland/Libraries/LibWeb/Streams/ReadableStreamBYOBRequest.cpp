@@ -6,14 +6,15 @@
 
 #include <LibWeb/Streams/ReadableByteStreamController.h>
 #include <LibWeb/Streams/ReadableStreamBYOBRequest.h>
+#include <LibWeb/WebIDL/Buffers.h>
 
 namespace Web::Streams {
 
 // https://streams.spec.whatwg.org/#rs-byob-request-view
-JS::GCPtr<JS::TypedArrayBase> ReadableStreamBYOBRequest::view()
+JS::GCPtr<WebIDL::ArrayBufferView> ReadableStreamBYOBRequest::view()
 {
     // 1. Return this.[[view]].
-    return m_view;
+    return *m_view;
 }
 
 ReadableStreamBYOBRequest::ReadableStreamBYOBRequest(JS::Realm& realm)
