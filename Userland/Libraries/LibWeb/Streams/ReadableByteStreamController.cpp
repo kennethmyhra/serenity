@@ -71,6 +71,8 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<WebIDL::Promise>> ReadableByteStreamControl
 // https://streams.spec.whatwg.org/#rbs-controller-private-pull
 WebIDL::ExceptionOr<void> ReadableByteStreamController::pull_steps(NonnullRefPtr<ReadRequest> read_request)
 {
+    dbgln("ReadableByteStreamController::pull_steps()");
+
     auto& vm = this->vm();
     auto& realm = this->realm();
 
@@ -79,8 +81,12 @@ WebIDL::ExceptionOr<void> ReadableByteStreamController::pull_steps(NonnullRefPtr
     // 2. Assert: ! ReadableStreamHasDefaultReader(stream) is true.
     VERIFY(readable_stream_has_default_reader(*m_stream));
 
+    dbgln("ReadableByteStreamController::pull_steps() - Queue Total Size: {}", m_queue_total_size);
+
     // 3. If this.[[queueTotalSize]] > 0,
     if (m_queue_total_size > 0) {
+        dbgln("ReadableByteStreamController::pull_steps() - queueTotalSize > 0");
+
         // 1. Assert: ! ReadableStreamGetNumReadRequests(stream) is 0.
         VERIFY(readable_stream_get_num_read_requests(*m_stream) == 0);
 
@@ -95,11 +101,14 @@ WebIDL::ExceptionOr<void> ReadableByteStreamController::pull_steps(NonnullRefPtr
 
     // 5. If autoAllocateChunkSize is not undefined,
     if (m_auto_allocate_chunk_size.has_value()) {
+        dbgln("ReadableByteStreamController::pull_steps() - autoAllocateChunkSize is not undefined");
+
         // 1. Let buffer be Construct(%ArrayBuffer%, « autoAllocateChunkSize »).
         auto buffer = JS::ArrayBuffer::create(realm, *m_auto_allocate_chunk_size);
 
         // 2. If buffer is an abrupt completion,
         if (buffer.is_throw_completion()) {
+            dbgln("ReadableByteStreamController::pull_steps() - buffer is an abrupt completion");
             // 1. Perform readRequest’s error steps, given buffer.[[Value]].
             read_request->on_error(*buffer.throw_completion().value());
 

@@ -12,6 +12,7 @@ namespace Web::Fetch::Infrastructure {
 // https://fetch.spec.whatwg.org/#queue-a-fetch-task
 void queue_fetch_task(JS::Object& task_destination, JS::SafeFunction<void()> algorithm)
 {
+    dbgln("Fetch::Infrastructure::queue_fetch_task: Queuing fetch task");
     // FIXME: 1. If taskDestination is a parallel queue, then enqueue algorithm to taskDestination.
 
     // 2. Otherwise, queue a global task on the networking task source with taskDestination and algorithm.

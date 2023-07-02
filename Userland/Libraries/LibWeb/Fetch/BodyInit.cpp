@@ -9,6 +9,7 @@
 #include <LibWeb/Fetch/BodyInit.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Bodies.h>
 #include <LibWeb/HTML/FormControlInfrastructure.h>
+#include <LibWeb/Streams/AbstractOperations.h>
 #include <LibWeb/URL/URLSearchParams.h>
 #include <LibWeb/WebIDL/AbstractOperations.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
@@ -19,6 +20,8 @@ namespace Web::Fetch {
 // https://fetch.spec.whatwg.org/#bodyinit-safely-extract
 WebIDL::ExceptionOr<Infrastructure::BodyWithType> safely_extract_body(JS::Realm& realm, BodyInitOrReadableBytes const& object)
 {
+    VERIFY(!realm.vm().execution_context_stack().is_empty());
+
     // 1. If object is a ReadableStream object, then:
     if (auto const* stream = object.get_pointer<JS::Handle<Streams::ReadableStream>>()) {
         // 1. Assert: object is neither disturbed nor locked.
@@ -39,6 +42,7 @@ WebIDL::ExceptionOr<Infrastructure::BodyWithType> extract_body(JS::Realm& realm,
 
     // 2. If object is a ReadableStream object, then set stream to object.
     if (auto const* stream_handle = object.get_pointer<JS::Handle<Streams::ReadableStream>>()) {
+        dbgln("If object is a ReadableStream object, then set stream to object.");
         stream = const_cast<Streams::ReadableStream*>(stream_handle->cell());
     }
     // 3. Otherwise, if object is a Blob object, set stream to the result of running object’s get stream.
@@ -49,8 +53,21 @@ WebIDL::ExceptionOr<Infrastructure::BodyWithType> extract_body(JS::Realm& realm,
     }
     // 4. Otherwise, set stream to a new ReadableStream object, and set up stream.
     else {
+        dbgln("Otherwise, set stream to a new ReadableStream object, and set up stream.");
+
         // FIXME: "set up stream"
+
+        // NOTE: Not part of the spec, but we need to have an execution context on the stack to call native functions.
+        auto& environment_settings_object = Bindings::host_defined_environment_settings_object(realm);
+        environment_settings_object.prepare_to_run_script();
+
+        ScopeGuard const guard = [&]() {
+            // See above NOTE.
+            environment_settings_object.clean_up_after_running_script();
+        };
+
         stream = MUST_OR_THROW_OOM(realm.heap().allocate<Streams::ReadableStream>(realm, realm));
+        TRY(Streams::set_up_readable_stream_controller_with_byte_reading_support(*stream));
     }
 
     // 5. Assert: stream is a ReadableStream object.

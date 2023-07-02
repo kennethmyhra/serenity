@@ -322,6 +322,8 @@ void readable_stream_error(ReadableStream& stream, JS::Value error)
 // https://streams.spec.whatwg.org/#readable-stream-add-read-request
 void readable_stream_add_read_request(ReadableStream& stream, ReadRequest const& read_request)
 {
+    dbgln("readable_stream_add_read_request: {}", &read_request);
+
     // 1. Assert: stream.[[reader]] implements ReadableStreamDefaultReader.
     VERIFY(stream.reader().has_value() && stream.reader()->has<JS::NonnullGCPtr<ReadableStreamDefaultReader>>());
 
@@ -438,6 +440,8 @@ void readable_stream_default_reader_error_read_requests(ReadableStreamDefaultRea
 // https://streams.spec.whatwg.org/#readable-stream-default-reader-read
 WebIDL::ExceptionOr<void> readable_stream_default_reader_read(ReadableStreamDefaultReader& reader, ReadRequest& read_request)
 {
+    dbgln("readable_stream_default_reader_read: reader={}, read_request={}", &reader, &read_request);
+
     // 1. Let stream be reader.[[stream]].
     auto stream = reader.stream();
 
@@ -449,6 +453,7 @@ WebIDL::ExceptionOr<void> readable_stream_default_reader_read(ReadableStreamDefa
 
     // 4. If stream.[[state]] is "closed", perform readRequest’s close steps.
     if (stream->is_closed()) {
+        dbgln("readable_stream_default_reader_read: stream is closed"sv);
         read_request.on_close();
     }
     // 5. Otherwise, if stream.[[state]] is "errored", perform readRequest’s error steps given stream.[[storedError]].
@@ -459,9 +464,10 @@ WebIDL::ExceptionOr<void> readable_stream_default_reader_read(ReadableStreamDefa
     else {
         // 1. Assert: stream.[[state]] is "readable".
         VERIFY(stream->is_readable());
-
+        dbgln("readable_stream_default_reader_read: stream is readable"sv);
         // 2. Perform ! stream.[[controller]].[[PullSteps]](readRequest).
         TRY(stream->controller()->visit([&](auto const& controller) {
+            dbgln("readable_stream_default_reader_read: calling pull_steps on controller={}", controller.ptr());
             return controller->pull_steps(read_request);
         }));
     }
@@ -882,8 +888,12 @@ WebIDL::ExceptionOr<void> set_up_readable_stream_default_controller_from_underly
 // https://streams.spec.whatwg.org/#readable-byte-stream-controller-call-pull-if-needed
 WebIDL::ExceptionOr<void> readable_byte_stream_controller_call_pull_if_needed(ReadableByteStreamController& controller)
 {
+    dbgln("ReadableByteStreamController::call_pull_if_needed()");
+
     // 1. Let shouldPull be ! ReadableByteStreamControllerShouldCallPull(controller).
     auto should_pull = readable_byte_stream_controller_should_call_pull(controller);
+
+    dbgln("shouldPull: {}", should_pull);
 
     // 2. If shouldPull is false, return.
     if (!should_pull)
@@ -891,6 +901,7 @@ WebIDL::ExceptionOr<void> readable_byte_stream_controller_call_pull_if_needed(Re
 
     // 3. If controller.[[pulling]] is true,
     if (controller.pulling()) {
+        dbgln("ReadableByteStreamController::call_pull_if_needed() - controller is pulling");
         // 1. Set controller.[[pullAgain]] to true.
         controller.set_pull_again(true);
 
@@ -909,11 +920,14 @@ WebIDL::ExceptionOr<void> readable_byte_stream_controller_call_pull_if_needed(Re
 
     // 7. Upon fulfillment of pullPromise,
     WebIDL::upon_fulfillment(*pull_promise, [&](auto const&) -> WebIDL::ExceptionOr<JS::Value> {
+        dbgln("ReadableByteStreamController::call_pull_if_needed() - pullPromise fulfilled");
+
         // 1. Set controller.[[pulling]] to false.
         controller.set_pulling(false);
 
         // 2. If controller.[[pullAgain]] is true,
         if (controller.pull_again()) {
+            dbgln("ReadableByteStreamController::call_pull_if_needed() - pullAgain is true");
             // 1. Set controller.[[pullAgain]] to false.
             controller.set_pull_again(false);
 
@@ -926,6 +940,8 @@ WebIDL::ExceptionOr<void> readable_byte_stream_controller_call_pull_if_needed(Re
 
     // 8. Upon rejection of pullPromise with reason e,
     WebIDL::upon_rejection(*pull_promise, [&](auto const& error) -> WebIDL::ExceptionOr<JS::Value> {
+        dbgln("ReadableByteStreamController::call_pull_if_needed() - pullPromise rejected");
+
         // 1. Perform ! ReadableByteStreamControllerError(controller, e).
         readable_byte_stream_controller_error(controller, error);
 
@@ -1469,6 +1485,8 @@ WebIDL::ExceptionOr<void> readable_stream_enqueue(ReadableStreamController& cont
 // https://streams.spec.whatwg.org/#readable-byte-stream-controller-enqueue
 WebIDL::ExceptionOr<void> readable_byte_stream_controller_enqueue(ReadableByteStreamController& controller, JS::Value chunk)
 {
+    dbgln("ReadableByteStreamController::enqueue({})", chunk);
+
     auto& vm = controller.vm();
     auto& realm = controller.realm();
 
@@ -1556,6 +1574,7 @@ WebIDL::ExceptionOr<void> readable_byte_stream_controller_enqueue(ReadableByteSt
     }
     // 10. Otherwise, if ! ReadableStreamHasBYOBReader(stream) is true,
     else if (readable_stream_has_byob_reader(*stream)) {
+        dbgln("ReadableStreamHasBYOBReader(stream) is true");
         // FIXME: 1. Perform ! ReadableByteStreamControllerEnqueueChunkToQueue(controller, transferredBuffer, byteOffset, byteLength).
         // FIXME: 2. Perform ! ReadableByteStreamControllerProcessPullIntoDescriptorsUsingQueue(controller).
         TODO();
@@ -1700,6 +1719,8 @@ WebIDL::ExceptionOr<void> set_up_readable_stream_controller_with_byte_reading_su
 
     // 2. Let pullAlgorithmWrapper be an algorithm that runs these steps:
     PullAlgorithm pull_algorithm_wrapper = [&realm, pull_algorithm = move(pull_algorithm)]() -> WebIDL::ExceptionOr<JS::NonnullGCPtr<WebIDL::Promise>> {
+        dbgln("ReadableStream: pull algorithm wrapper");
+
         // 1. Let result be the result of running pullAlgorithm, if pullAlgorithm was given, or null otherwise. If this throws an exception e, return a promise rejected with e.
         JS::GCPtr<JS::PromiseCapability> result = nullptr;
         if (pull_algorithm.has_value())
@@ -3305,6 +3326,8 @@ JS::ThrowCompletionOr<JS::Handle<WebIDL::CallbackType>> property_to_callback(JS:
 // https://streams.spec.whatwg.org/#set-up-readable-byte-stream-controller-from-underlying-source
 WebIDL::ExceptionOr<void> set_up_readable_byte_stream_controller_from_underlying_source(ReadableStream& stream, JS::Value underlying_source, UnderlyingSource const& underlying_source_dict, double high_water_mark)
 {
+    dbgln("ReadableStream: Setting up ReadableByteStreamController from underlying source");
+
     auto& realm = stream.realm();
 
     // 1. Let controller be a new ReadableByteStreamController.

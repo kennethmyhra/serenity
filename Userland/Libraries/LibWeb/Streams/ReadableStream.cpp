@@ -21,6 +21,8 @@ namespace Web::Streams {
 // https://streams.spec.whatwg.org/#rs-constructor
 WebIDL::ExceptionOr<JS::NonnullGCPtr<ReadableStream>> ReadableStream::construct_impl(JS::Realm& realm, Optional<JS::Handle<JS::Object>> const& underlying_source_object, QueuingStrategy const& strategy)
 {
+    dbgln("Constructing a ReadableStream");
+
     auto& vm = realm.vm();
 
     auto readable_stream = MUST_OR_THROW_OOM(realm.heap().allocate<ReadableStream>(realm, realm));

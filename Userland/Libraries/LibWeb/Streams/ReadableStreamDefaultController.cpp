@@ -81,6 +81,8 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<WebIDL::Promise>> ReadableStreamDefaultCont
 // https://streams.spec.whatwg.org/#rs-default-controller-private-pull
 WebIDL::ExceptionOr<void> ReadableStreamDefaultController::pull_steps(Web::Streams::ReadRequest& read_request)
 {
+    dbgln("ReadableStreamDefaultController::pull_steps()");
+
     // 1. Let stream be this.[[stream]].
     auto& stream = *m_stream;
 
