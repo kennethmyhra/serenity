@@ -9,6 +9,7 @@
 #include <LibWeb/Fetch/BodyInit.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Bodies.h>
 #include <LibWeb/HTML/FormControlInfrastructure.h>
+#include <LibWeb/Streams/AbstractOperations.h>
 #include <LibWeb/URL/URLSearchParams.h>
 #include <LibWeb/WebIDL/AbstractOperations.h>
 #include <LibWeb/WebIDL/Buffers.h>
@@ -50,8 +51,8 @@ WebIDL::ExceptionOr<Infrastructure::BodyWithType> extract_body(JS::Realm& realm,
     }
     // 4. Otherwise, set stream to a new ReadableStream object, and set up stream.
     else {
-        // FIXME: "set up stream"
         stream = realm.heap().allocate<Streams::ReadableStream>(realm, realm);
+        TRY(Streams::set_up_readable_stream_controller_with_byte_reading_support(*stream));
     }
 
     // 5. Assert: stream is a ReadableStream object.

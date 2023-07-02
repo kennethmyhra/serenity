@@ -16,6 +16,7 @@
 #include <LibJS/Runtime/TypedArray.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/DOM/AbortSignal.h>
+#include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
 #include <LibWeb/Streams/AbstractOperations.h>
 #include <LibWeb/Streams/QueuingStrategy.h>
 #include <LibWeb/Streams/ReadableByteStreamController.h>
@@ -400,6 +401,9 @@ void readable_stream_reader_generic_initialize(ReadableStreamReader reader, Read
     // 2. Set stream.[[reader]] to reader.
     stream.set_reader(reader);
 
+    // NON-STANDARD
+    HTML::TemporaryExecutionContext execution_context { Bindings::host_defined_environment_settings_object(realm) };
+
     // 3. If stream.[[state]] is "readable",
     if (stream.state() == ReadableStream::State::Readable) {
         // 1. Set reader.[[closedPromise]] to a new promise.
@@ -625,7 +629,6 @@ WebIDL::ExceptionOr<void> readable_stream_default_reader_read(ReadableStreamDefa
     else {
         // 1. Assert: stream.[[state]] is "readable".
         VERIFY(stream->is_readable());
-
         // 2. Perform ! stream.[[controller]].[[PullSteps]](readRequest).
         TRY(stream->controller()->visit([&](auto const& controller) {
             return controller->pull_steps(read_request);
@@ -1436,6 +1439,8 @@ WebIDL::ExceptionOr<void> set_up_readable_stream_default_controller_from_underly
 // https://streams.spec.whatwg.org/#readable-byte-stream-controller-call-pull-if-needed
 WebIDL::ExceptionOr<void> readable_byte_stream_controller_call_pull_if_needed(ReadableByteStreamController& controller)
 {
+    auto& realm = controller.realm();
+
     // 1. Let shouldPull be ! ReadableByteStreamControllerShouldCallPull(controller).
     auto should_pull = readable_byte_stream_controller_should_call_pull(controller);
 
@@ -1457,6 +1462,15 @@ WebIDL::ExceptionOr<void> readable_byte_stream_controller_call_pull_if_needed(Re
 
     // 5. Set controller.[[pulling]] to true.
     controller.set_pulling(true);
+
+    // NON-STANDARD
+    auto& environment_settings = Bindings::host_defined_environment_settings_object(realm);
+    realm.vm().push_execution_context(environment_settings.realm_execution_context());
+    environment_settings.prepare_to_run_callback();
+    ScopeGuard const guard = [&environment_settings, &realm] {
+        environment_settings.clean_up_after_running_callback();
+        realm.vm().pop_execution_context();
+    };
 
     // 6. Let pullPromise be the result of performing controller.[[pullAlgorithm]].
     auto pull_promise = TRY((*controller.pull_algorithm())());
@@ -1957,6 +1971,14 @@ WebIDL::ExceptionOr<void> set_up_readable_byte_stream_controller(ReadableStream&
     // 14. Let startResult be the result of performing startAlgorithm.
     auto start_result = TRY(start_algorithm());
 
+    auto& environment_settings = Bindings::host_defined_environment_settings_object(realm);
+    realm.vm().push_execution_context(environment_settings.realm_execution_context());
+    environment_settings.prepare_to_run_callback();
+    ScopeGuard const guard = [&environment_settings, &realm] {
+        environment_settings.clean_up_after_running_callback();
+        realm.vm().pop_execution_context();
+    };
+
     // 15. Let startPromise be a promise resolved with startResult.
     auto start_promise = WebIDL::create_resolved_promise(realm, start_result);
 
@@ -2325,6 +2347,8 @@ WebIDL::ExceptionOr<void> set_up_readable_stream_controller_with_byte_reading_su
 
     // 2. Let pullAlgorithmWrapper be an algorithm that runs these steps:
     PullAlgorithm pull_algorithm_wrapper = [&realm, pull_algorithm = move(pull_algorithm)]() -> WebIDL::ExceptionOr<JS::NonnullGCPtr<WebIDL::Promise>> {
+        dbgln("ReadableStream: pull algorithm wrapper");
+
         // 1. Let result be the result of running pullAlgorithm, if pullAlgorithm was given, or null otherwise. If this throws an exception e, return a promise rejected with e.
         JS::GCPtr<JS::PromiseCapability> result = nullptr;
         if (pull_algorithm.has_value())

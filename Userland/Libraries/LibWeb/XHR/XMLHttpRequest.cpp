@@ -747,6 +747,7 @@ WebIDL::ExceptionOr<void> XMLHttpRequest::send(Optional<DocumentOrXMLHttpRequest
         // NOTE: request_body_length is captured by copy as to not UAF it when we leave `send()` and the callback gets called.
         // NOTE: `this` is kept alive by FetchAlgorithms using JS::SafeFunction.
         auto process_request_end_of_body = [this, request_body_length]() {
+            dbgln("process_request_end_of_body");
             // 1. Set this’s upload complete flag.
             m_upload_complete = true;
 
@@ -809,37 +810,51 @@ WebIDL::ExceptionOr<void> XMLHttpRequest::send(Optional<DocumentOrXMLHttpRequest
             // FIXME: We can't implement these steps yet, as we don't fully implement the Streams standard.
 
             // 10. Let processBodyChunk given bytes be these steps:
-            //     1. Append bytes to this’s received bytes.
-            //     2. If not roughly 50ms have passed since these steps were last invoked, then return.
-            //     3. If this’s state is headers received, then set this’s state to loading.
-            //     4. Fire an event named readystatechange at this.
-            //     Spec Note: Web compatibility is the reason readystatechange fires more often than this’s state changes.
-            //     5. Fire a progress event named progress at this with this’s received bytes’s length and length.
+            Fetch::Infrastructure::Body::ProcessBodyChunkCallback process_body_chunks = [this, length](ByteBuffer const& bytes) {
+                // 1. Append bytes to this’s received bytes.
+                m_received_bytes.append(bytes);
+
+                // FIXME: 2. If not roughly 50ms have passed since these steps were last invoked, then return.
+
+                // 3. If this’s state is headers received, then set this’s state to loading.
+                if (m_state == State::HeadersReceived)
+                    m_state = State::Loading;
+
+                // 4. Fire an event named readystatechange at this.
+                // Spec Note: Web compatibility is the reason readystatechange fires more often than this’s state changes.
+                dispatch_event(*DOM::Event::create(this->realm(), EventNames::readystatechange));
+
+                // 5. Fire a progress event named progress at this with this’s received bytes’s length and length.
+                fire_progress_event(*this, EventNames::progress, m_received_bytes.size(), length.get<u64>());
+            };
 
             // 11. Let processEndOfBody be this step: run handle response end-of-body for this.
+            Fetch::Infrastructure::Body::ProcessEndOfBodyCallback process_end_of_body = [this]() {
+                // NOTE: This cannot throw, as `handle_response_end_of_body` only throws in a synchronous context.
+                // FIXME: However, we can receive allocation failures, but we can't propagate them anywhere currently.
+                handle_response_end_of_body().release_value_but_fixme_should_propagate_errors();
+            };
 
             // 12. Let processBodyError be these steps:
-            //     1. Set this’s response to a network error.
-            //     2. Run handle errors for this.
+            Fetch::Infrastructure::Body::ProcessBodyErrorCallback process_body_error = [this](const auto&) {
+                auto& vm = this->vm();
+
+                // 1. Set this’s response to a network error.
+                m_response = Fetch::Infrastructure::Response::network_error(vm, "A network error occurred processing body."sv);
+
+                // 2. Run handle errors for this.
+                // NOTE: This cannot throw, as `handle_errors` only throws in a synchronous context.
+                // FIXME: However, we can receive allocation failures, but we can't propagate them anywhere currently.
+                handle_errors().release_value_but_fixme_should_propagate_errors();
+            };
 
             // 13. Incrementally read this’s response’s body, given processBodyChunk, processEndOfBody, processBodyError, and this’s relevant global object.
+            auto global_object = JS::NonnullGCPtr<JS::Object> { HTML::relevant_global_object(*this) };
+            response->body()->incrementally_read(move(process_body_chunks), move(process_end_of_body), move(process_body_error), global_object).release_value_but_fixme_should_propagate_errors();
         };
 
-        // FIXME: Remove this once we implement the Streams standard. See above.
-        // NOTE: `this` is kept alive by FetchAlgorithms using JS::SafeFunction.
-        auto process_response_consume_body = [this](JS::NonnullGCPtr<Fetch::Infrastructure::Response>, Variant<Empty, Fetch::Infrastructure::FetchAlgorithms::ConsumeBodyFailureTag, ByteBuffer> null_or_failure_or_bytes) {
-            // NOTE: `response` is not used here as `process_response` is called before `process_response_consume_body` and thus `m_response` is already set up.
-            if (null_or_failure_or_bytes.has<ByteBuffer>()) {
-                // NOTE: We are not in a context where we can throw if this fails due to OOM.
-                m_received_bytes.append(null_or_failure_or_bytes.get<ByteBuffer>());
-            }
-
-            // NOTE: This cannot throw, as `handle_response_end_of_body` only throws in a synchronous context.
-            // FIXME: However, we can receive allocation failures, but we can't propagate them anywhere currently.
-            handle_response_end_of_body().release_value_but_fixme_should_propagate_errors();
-        };
-
-        // 10. Set this’s fetch controller to the result of fetching req with processRequestBodyChunkLength set to processRequestBodyChunkLength, processRequestEndOfBody set to processRequestEndOfBody, and processResponse set to processResponse.
+        // 10. Set this’s fetch controller to the result of fetching req with processRequestBodyChunkLength set to processRequestBodyChunkLength,
+        // processRequestEndOfBody set to processRequestEndOfBody, and processResponse set to processResponse.
         m_fetch_controller = TRY(Fetch::Fetching::fetch(
             realm,
             request,
@@ -850,7 +865,8 @@ WebIDL::ExceptionOr<void> XMLHttpRequest::send(Optional<DocumentOrXMLHttpRequest
                     .process_early_hints_response = {},
                     .process_response = move(process_response),
                     .process_response_end_of_body = {},
-                    .process_response_consume_body = move(process_response_consume_body), // FIXME: Set this to null once we implement the Streams standard. See above.
+                    .process_response_consume_body = {},
+                    //.process_response_consume_body = move(process_response_consume_body), // FIXME: Set this to null once we implement the Streams standard. See above.
                 })));
 
         // 11. Let now be the present time.
