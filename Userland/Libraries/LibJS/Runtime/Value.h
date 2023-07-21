@@ -440,13 +440,13 @@ public:
         return static_cast<i32>(m_value.encoded & 0xFFFFFFFF);
     }
 
-private:
     Value(u64 tag, u64 val)
     {
         VERIFY(!(tag & val));
         m_value.encoded = tag | val;
     }
 
+private:
     template<typename PointerType>
     Value(u64 tag, PointerType const* ptr)
     {
