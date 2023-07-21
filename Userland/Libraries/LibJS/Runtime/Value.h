@@ -365,6 +365,7 @@ public:
     FunctionObject const& as_function() const;
 
     u64 encoded() const { return m_value.encoded; }
+    u64 tag() const { return m_value.tag; }
 
     ThrowCompletionOr<String> to_string(VM&) const;
     ThrowCompletionOr<DeprecatedString> to_deprecated_string(VM&) const;
