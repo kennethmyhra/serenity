@@ -12,6 +12,7 @@
 #include <LibJS/Forward.h>
 #include <LibJS/Runtime/BigInt.h>
 #include <LibJS/Runtime/PrimitiveString.h>
+#include <LibJS/Runtime/StringObject.h>
 #include <LibJS/Runtime/VM.h>
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/HTML/StructuredSerialize.h>
@@ -45,6 +46,8 @@ enum ValueTag {
 
     // Following two u32s representing the length of the string, then the following u32s, equal to size, is the string representation.
     StringPrimitive,
+
+    StringObject,
 
     // TODO: Define many more types
 
@@ -84,6 +87,13 @@ public:
         } else if (value.is_string()) {
             m_serialized.append(ValueTag::StringPrimitive);
             TRY(serialize_string(m_serialized, value.as_string()));
+        } else if (value.is_object()) {
+            auto& value_object = value.as_object();
+            if (is<JS::StringObject>(value_object)) {
+                m_serialized.append(ValueTag::StringObject);
+                auto& string_object = static_cast<JS::StringObject&>(value_object);
+                TRY(serialize_string(m_serialized, string_object.primitive_string()));
+            }
         } else {
             // TODO: Define many more types
             m_error = "Unsupported type"sv;
@@ -175,6 +185,12 @@ public:
             case ValueTag::StringPrimitive: {
                 auto string = TRY(deserialize_string_primitive(m_vm, m_vector, position));
                 m_memory.append(JS::Value { string });
+                break;
+            }
+            case ValueTag::StringObject: {
+                auto* realm = m_vm.current_realm();
+                auto string = TRY(deserialize_string_primitive(m_vm, m_vector, position));
+                m_memory.append(TRY(JS::StringObject::create(*realm, string, realm->intrinsics().string_prototype())));
                 break;
             }
             default:
