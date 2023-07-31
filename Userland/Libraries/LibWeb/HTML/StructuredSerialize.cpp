@@ -10,6 +10,7 @@
 #include <AK/String.h>
 #include <AK/Vector.h>
 #include <LibJS/Forward.h>
+#include <LibJS/Runtime/ArrayBuffer.h>
 #include <LibJS/Runtime/BigInt.h>
 #include <LibJS/Runtime/BooleanObject.h>
 #include <LibJS/Runtime/Date.h>
@@ -63,6 +64,8 @@ enum ValueTag {
     StringObject,
 
     DateObject,
+
+    ArrayBufferObject,
 
     // TODO: Define many more types
 
@@ -121,6 +124,11 @@ public:
                 auto& date_object = static_cast<JS::Date&>(value_object);
                 double const date_value = date_object.date_value();
                 m_serialized.append(bit_cast<u32*>(&date_value), 2);
+            } else if (is<JS::ArrayBuffer>(value_object)) {
+                m_serialized.append(ValueTag::ArrayBufferObject);
+                auto& array_buffer_object = static_cast<JS::ArrayBuffer&>(value_object);
+                TRY(serialize_byte_sequence(m_serialized, array_buffer_object.buffer()));
+            } else {
             }
         } else {
             // TODO: Define many more types
@@ -145,14 +153,12 @@ private:
     SerializationRecord m_serialized;
     JS::VM& m_vm;
 
-    WebIDL::ExceptionOr<void> serialize_string(Vector<u32>& vector, String const& string)
+    WebIDL::ExceptionOr<void> serialize_byte_sequence(Vector<u32>& vector, ReadonlyBytes bytes)
     {
-        u64 const size = string.code_points().byte_length();
-        // Append size of the string to the serialized structure.
+        u64 const size = bytes.size();
+        // Append size of byte sequence to the serialized structure.
         TRY_OR_THROW_OOM(m_vm, vector.try_append(bit_cast<u32*>(&size), 2));
-        // Append the bytes of the string to the serialized structure.
         u64 byte_position = 0;
-        ReadonlyBytes const bytes = { string.code_points().bytes(), string.code_points().byte_length() };
         while (byte_position < size) {
             u32 combined_value = 0;
             for (u8 i = 0; i < 4; ++i) {
@@ -165,6 +171,11 @@ private:
             TRY_OR_THROW_OOM(m_vm, vector.try_append(combined_value));
         }
         return {};
+    }
+
+    WebIDL::ExceptionOr<void> serialize_string(Vector<u32>& vector, String const& string)
+    {
+        return serialize_byte_sequence(vector, string.bytes());
     }
 
     WebIDL::ExceptionOr<void> serialize_string(Vector<u32>& vector, JS::PrimitiveString const& primitive_string)
@@ -252,6 +263,11 @@ public:
                 m_memory.append(JS::Date::create(*realm, value));
                 break;
             }
+            case ValueTag::ArrayBufferObject: {
+                auto array_buffer = TRY(deserialize_array_buffer(m_vm, m_vector, position));
+                m_memory.append(array_buffer);
+                break;
+            }
             default:
                 m_error = "Unsupported type"sv;
                 break;
@@ -273,7 +289,7 @@ private:
     JS::MarkedVector<JS::Value> m_memory; // Index -> JS value
     StringView m_error;
 
-    static WebIDL::ExceptionOr<JS::NonnullGCPtr<JS::PrimitiveString>> deserialize_string_primitive(JS::VM& vm, Vector<u32> const& vector, u32& position)
+    static WebIDL::ExceptionOr<Vector<u8>> deserialize_byte_sequence(JS::VM& vm, Vector<u32> const& vector, u32& position)
     {
         u32 size_bits[2];
         size_bits[0] = vector[position++];
@@ -292,6 +308,41 @@ private:
             }
             position++;
         }
+
+        return bytes;
+    }
+
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<JS::ArrayBuffer>> deserialize_array_buffer(JS::VM& vm, Vector<u32> const& vector, u32& position)
+    {
+        auto& realm = *vm.current_realm();
+        auto bytes = TRY(deserialize_byte_sequence(vm, vector, position));
+        auto buffer = TRY_OR_THROW_OOM(vm, ByteBuffer::copy(bytes.data(), bytes.size()));
+        return TRY(Bindings::throw_dom_exception_if_needed(vm, [&realm, buffer]() -> WebIDL::ExceptionOr<JS::NonnullGCPtr<JS::ArrayBuffer>> {
+            return JS::ArrayBuffer::create(realm, buffer);
+        }));
+    }
+
+    static WebIDL::ExceptionOr<JS::NonnullGCPtr<JS::PrimitiveString>> deserialize_string_primitive(JS::VM& vm, Vector<u32> const& vector, u32& position)
+    {
+        auto bytes = TRY(deserialize_byte_sequence(vm, vector, position));
+
+        //        u32 size_bits[2];
+        //        size_bits[0] = vector[position++];
+        //        size_bits[1] = vector[position++];
+        //        u64 const size = *bit_cast<u64*>(&size_bits);
+        //
+        //        Vector<u8> bytes;
+        //        TRY_OR_THROW_OOM(vm, bytes.try_ensure_capacity(size));
+        //        u64 byte_position = 0;
+        //        while (position < vector.size()) {
+        //            for (u8 i = 0; i < 4; ++i) {
+        //                bytes.append(vector[position] >> (i * 8) & 0xFF);
+        //                byte_position++;
+        //                if (byte_position == size)
+        //                    break;
+        //            }
+        //            position++;
+        //        }
 
         return TRY(Bindings::throw_dom_exception_if_needed(vm, [&vm, &bytes]() {
             return JS::PrimitiveString::create(vm, StringView { bytes });
