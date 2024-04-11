@@ -73,23 +73,23 @@ static WebIDL::ExceptionOr<JS::NonnullGCPtr<DOM::Document>> load_markdown_docume
 
     return create_document_for_inline_content(navigation_params.navigable.ptr(), navigation_params.id, [&](DOM::Document& document) {
         auto& realm = document.realm();
-        auto process_body = [&document, url = navigation_params.response->url().value(), extra_head_contents](ByteBuffer data) {
+        auto process_body = JS::create_heap_function(realm.heap(), [&document, url = navigation_params.response->url().value(), extra_head_contents](ByteBuffer data) {
             auto markdown_document = Markdown::Document::parse(data);
             if (!markdown_document)
                 return;
 
             auto parser = HTML::HTMLParser::create(document, markdown_document->render_to_html(extra_head_contents), "utf-8"sv);
             parser->run(url);
-        };
+        });
 
-        auto process_body_error = [](auto) {
+        auto process_body_error = JS::create_heap_function(realm.heap(), [](JS::GCPtr<WebIDL::DOMException>) {
             dbgln("FIXME: Load html page with an error if read of body failed.");
-        };
+        });
 
         navigation_params.response->body()->fully_read(
                                               realm,
-                                              move(process_body),
-                                              move(process_body_error),
+                                              process_body,
+                                              process_body_error,
                                               JS::NonnullGCPtr { realm.global_object() })
             .release_value_but_fixme_should_propagate_errors();
     });
@@ -148,20 +148,20 @@ static WebIDL::ExceptionOr<JS::NonnullGCPtr<DOM::Document>> load_html_document(H
     //    document's relevant global object to have the parser to process the implied EOF character, which eventually
     //    causes a load event to be fired.
     else {
+        auto& realm = document->realm();
         // FIXME: Parse as we receive the document data, instead of waiting for the whole document to be fetched first.
-        auto process_body = [document, url = navigation_params.response->url().value()](ByteBuffer data) {
+        auto process_body = JS::create_heap_function(realm.heap(), [document, url = navigation_params.response->url().value()](ByteBuffer data) {
             Platform::EventLoopPlugin::the().deferred_invoke([document = document, data = move(data), url = url] {
                 auto parser = HTML::HTMLParser::create_with_uncertain_encoding(document, data);
                 parser->run(url);
             });
-        };
+        });
 
-        auto process_body_error = [](auto) {
+        auto process_body_error = JS::create_heap_function(realm.heap(), [](JS::GCPtr<WebIDL::DOMException>) {
             dbgln("FIXME: Load html page with an error if read of body failed.");
-        };
+        });
 
-        auto& realm = document->realm();
-        TRY(navigation_params.response->body()->fully_read(realm, move(process_body), move(process_body_error), JS::NonnullGCPtr { realm.global_object() }));
+        TRY(navigation_params.response->body()->fully_read(realm, process_body, process_body_error, JS::NonnullGCPtr { realm.global_object() }));
     }
 
     // 4. Return document.
@@ -204,7 +204,9 @@ static WebIDL::ExceptionOr<JS::NonnullGCPtr<DOM::Document>> load_xml_document(HT
     if (auto maybe_encoding = type.parameters().get("charset"sv); maybe_encoding.has_value())
         content_encoding = maybe_encoding.value();
 
-    auto process_body = [document, url = navigation_params.response->url().value(), content_encoding = move(content_encoding)](ByteBuffer data) {
+    auto& realm = document->realm();
+
+    auto process_body = JS::create_heap_function(realm.heap(), [document, url = navigation_params.response->url().value(), content_encoding = move(content_encoding)](ByteBuffer data) {
         Optional<TextCodec::Decoder&> decoder;
         // The actual HTTP headers and other metadata, not the headers as mutated or implied by the algorithms given in this specification,
         // are the ones that must be used when determining the character encoding according to the rules given in the above specifications.
@@ -234,14 +236,13 @@ static WebIDL::ExceptionOr<JS::NonnullGCPtr<DOM::Document>> load_xml_document(HT
             // FIXME: Insert error message into the document.
             dbgln("Failed to parse XML document: {}", result.error());
         }
-    };
+    });
 
-    auto process_body_error = [](auto) {
+    auto process_body_error = JS::create_heap_function(realm.heap(), [](JS::GCPtr<WebIDL::DOMException>) {
         dbgln("FIXME: Load html page with an error if read of body failed.");
-    };
+    });
 
-    auto& realm = document->realm();
-    TRY(navigation_params.response->body()->fully_read(realm, move(process_body), move(process_body_error), JS::NonnullGCPtr { realm.global_object() }));
+    TRY(navigation_params.response->body()->fully_read(realm, process_body, process_body_error, JS::NonnullGCPtr { realm.global_object() }));
 
     return document;
 }
@@ -272,8 +273,9 @@ static WebIDL::ExceptionOr<JS::NonnullGCPtr<DOM::Document>> load_text_document(H
     //    When no more bytes are available, the user agent must queue a global task on the networking task source given
     //    document's relevant global object to have the parser to process the implied EOF character, which eventually causes a
     //    load event to be fired.
+    auto& realm = document->realm();
     // FIXME: Parse as we receive the document data, instead of waiting for the whole document to be fetched first.
-    auto process_body = [document, url = navigation_params.response->url().value()](ByteBuffer data) {
+    auto process_body = JS::create_heap_function(realm.heap(), [document, url = navigation_params.response->url().value()](ByteBuffer data) {
         auto encoding = run_encoding_sniffing_algorithm(document, data);
         dbgln_if(HTML_PARSER_DEBUG, "The encoding sniffing algorithm returned encoding '{}'", encoding);
 
@@ -297,14 +299,13 @@ static WebIDL::ExceptionOr<JS::NonnullGCPtr<DOM::Document>> load_text_document(H
         MUST(document->head()->append_child(title_element));
         auto title_text = document->heap().allocate<DOM::Text>(document->realm(), document, title);
         MUST(title_element->append_child(*title_text));
-    };
+    });
 
-    auto process_body_error = [](auto) {
+    auto process_body_error = JS::create_heap_function(realm.heap(), [](JS::GCPtr<WebIDL::DOMException>) {
         dbgln("FIXME: Load html page with an error if read of body failed.");
-    };
+    });
 
-    auto& realm = document->realm();
-    TRY(navigation_params.response->body()->fully_read(realm, move(process_body), move(process_body_error), JS::NonnullGCPtr { realm.global_object() }));
+    TRY(navigation_params.response->body()->fully_read(realm, process_body, process_body_error, JS::NonnullGCPtr { realm.global_object() }));
 
     // 6. Return document.
     return document;
@@ -392,10 +393,14 @@ static WebIDL::ExceptionOr<JS::NonnullGCPtr<DOM::Document>> load_media_document(
     //        However, if we don't, then we get stuck in HTMLParser::the_end() waiting for the media file to load, which
     //        never happens.
     auto& realm = document->realm();
+    auto process_body = JS::create_heap_function(realm.heap(), [document](ByteBuffer) {
+        HTML::HTMLParser::the_end(document);
+    });
+    auto process_body_error = JS::create_heap_function(realm.heap(), [](JS::GCPtr<WebIDL::DOMException>) {});
     TRY(navigation_params.response->body()->fully_read(
         realm,
-        [document](auto) { HTML::HTMLParser::the_end(document); },
-        [](auto) {},
+        process_body,
+        process_body_error,
         JS::NonnullGCPtr { realm.global_object() }));
 
     // 9. Return document.

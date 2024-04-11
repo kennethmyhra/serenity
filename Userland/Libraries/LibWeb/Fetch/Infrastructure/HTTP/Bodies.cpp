@@ -62,7 +62,7 @@ JS::NonnullGCPtr<Body> Body::clone(JS::Realm& realm)
 }
 
 // https://fetch.spec.whatwg.org/#body-fully-read
-WebIDL::ExceptionOr<void> Body::fully_read(JS::Realm& realm, Web::Fetch::Infrastructure::Body::ProcessBodyCallback process_body, Web::Fetch::Infrastructure::Body::ProcessBodyErrorCallback process_body_error, TaskDestination task_destination) const
+WebIDL::ExceptionOr<void> Body::fully_read(JS::Realm& realm, JS::NonnullGCPtr<ProcessBodyCallback> process_body, JS::NonnullGCPtr<ProcessBodyErrorCallback> process_body_error, TaskDestination task_destination) const
 {
     auto& vm = realm.vm();
 
@@ -72,19 +72,19 @@ WebIDL::ExceptionOr<void> Body::fully_read(JS::Realm& realm, Web::Fetch::Infrast
     auto task_destination_object = task_destination.get<JS::NonnullGCPtr<JS::Object>>();
 
     // 2. Let successSteps given a byte sequence bytes be to queue a fetch task to run processBody given bytes, with taskDestination.
-    auto success_steps = [process_body = move(process_body), task_destination_object = JS::make_handle(task_destination_object)](ByteBuffer const& bytes) mutable -> ErrorOr<void> {
+    auto success_steps = [process_body, task_destination_object = JS::make_handle(task_destination_object)](ByteBuffer const& bytes) mutable -> ErrorOr<void> {
         // Make a copy of the bytes, as the source of the bytes may disappear between the time the task is queued and executed.
         auto bytes_copy = TRY(ByteBuffer::copy(bytes));
-        queue_fetch_task(*task_destination_object, [process_body = move(process_body), bytes_copy = move(bytes_copy)]() {
-            process_body(move(bytes_copy));
+        queue_fetch_task(*task_destination_object, [process_body, bytes_copy = move(bytes_copy)]() {
+            process_body->function()(move(bytes_copy));
         });
         return {};
     };
 
     // 3. Let errorSteps optionally given an exception exception be to queue a fetch task to run processBodyError given exception, with taskDestination.
-    auto error_steps = [process_body_error = move(process_body_error), task_destination_object = JS::make_handle(task_destination_object)](JS::GCPtr<WebIDL::DOMException> exception) mutable {
-        queue_fetch_task(*task_destination_object, [process_body_error = move(process_body_error), exception = JS::make_handle(exception)]() {
-            process_body_error(*exception);
+    auto error_steps = [process_body_error, task_destination_object = JS::make_handle(task_destination_object)](JS::GCPtr<WebIDL::DOMException> exception) mutable {
+        queue_fetch_task(*task_destination_object, [process_body_error, exception = JS::make_handle(exception)]() {
+            process_body_error->function()(*exception);
         });
     };
 

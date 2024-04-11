@@ -28,9 +28,9 @@ class Body final : public JS::Cell {
 public:
     using SourceType = Variant<Empty, ByteBuffer, JS::Handle<FileAPI::Blob>>;
     // processBody must be an algorithm accepting a byte sequence.
-    using ProcessBodyCallback = JS::SafeFunction<void(ByteBuffer)>;
+    using ProcessBodyCallback = JS::HeapFunction<void(ByteBuffer)>;
     // processBodyError must be an algorithm optionally accepting an exception.
-    using ProcessBodyErrorCallback = JS::SafeFunction<void(JS::GCPtr<WebIDL::DOMException>)>;
+    using ProcessBodyErrorCallback = JS::HeapFunction<void(JS::GCPtr<WebIDL::DOMException>)>;
 
     [[nodiscard]] static JS::NonnullGCPtr<Body> create(JS::VM&, JS::NonnullGCPtr<Streams::ReadableStream>);
     [[nodiscard]] static JS::NonnullGCPtr<Body> create(JS::VM&, JS::NonnullGCPtr<Streams::ReadableStream>, SourceType, Optional<u64>);
@@ -41,7 +41,7 @@ public:
 
     [[nodiscard]] JS::NonnullGCPtr<Body> clone(JS::Realm&);
 
-    WebIDL::ExceptionOr<void> fully_read(JS::Realm&, ProcessBodyCallback process_body, ProcessBodyErrorCallback process_body_error, TaskDestination task_destination) const;
+    WebIDL::ExceptionOr<void> fully_read(JS::Realm&, JS::NonnullGCPtr<ProcessBodyCallback> process_body, JS::NonnullGCPtr<ProcessBodyErrorCallback> process_body_error, TaskDestination task_destination) const;
 
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
