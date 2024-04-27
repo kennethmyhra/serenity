@@ -4938,10 +4938,10 @@ void transform_stream_set_up(TransformStream& stream, JS::NonnullGCPtr<Transform
     });
 
     // 5. Let transformAlgorithmWrapper be an algorithm that runs these steps given a value chunk:
-    auto transform_algorithm_wrapper = JS::create_heap_function(realm.heap(), [&realm, transform_algorithm](JS::Value chunk) -> WebIDL::ExceptionOr<JS::NonnullGCPtr<WebIDL::Promise>> {
+    auto transform_algorithm_wrapper = JS::create_heap_function(realm.heap(), [&realm, transform_algorithm](JS::Value chunk) -> JS::NonnullGCPtr<WebIDL::Promise> {
         // 1. Let result be the result of running transformAlgorithm given chunk. If this throws an exception e, return a promise rejected with e.
         JS::GCPtr<JS::PromiseCapability> result = nullptr;
-        result = TRY(transform_algorithm->function()(chunk));
+        result = transform_algorithm->function()(chunk);
 
         // 2. If result is a Promise, then return result.
         if (result)
@@ -4952,11 +4952,11 @@ void transform_stream_set_up(TransformStream& stream, JS::NonnullGCPtr<Transform
     });
 
     // 6. Let flushAlgorithmWrapper be an algorithm that runs these steps:
-    auto flush_algorithm_wrapper = JS::create_heap_function(realm.heap(), [&realm, flush_algorithm]() -> WebIDL::ExceptionOr<JS::NonnullGCPtr<WebIDL::Promise>> {
+    auto flush_algorithm_wrapper = JS::create_heap_function(realm.heap(), [&realm, flush_algorithm]() -> JS::NonnullGCPtr<WebIDL::Promise> {
         // 1. Let result be the result of running flushAlgorithm, if flushAlgorithm was given, or null otherwise. If this throws an exception e, return a promise rejected with e.
         JS::GCPtr<JS::PromiseCapability> result = nullptr;
         if (flush_algorithm)
-            result = TRY(flush_algorithm->function()());
+            result = flush_algorithm->function()();
 
         // 2. If result is a Promise, then return result.
         if (result)
@@ -4972,7 +4972,7 @@ void transform_stream_set_up(TransformStream& stream, JS::NonnullGCPtr<Transform
     auto start_promise = WebIDL::create_resolved_promise(realm, JS::js_undefined());
 
     // 9. Perform ! InitializeTransformStream(stream, startPromise, writableHighWaterMark, writableSizeAlgorithm, readableHighWaterMark, readableSizeAlgorithm).
-    MUST(initialize_transform_stream(stream, start_promise, writable_high_water_mark, writable_size_algorithm, readable_high_water_mark, readable_size_algorithm));
+    initialize_transform_stream(stream, start_promise, writable_high_water_mark, writable_size_algorithm, readable_high_water_mark, readable_size_algorithm);
 
     // 10. Let controller be a new TransformStreamDefaultController.
     auto controller = realm.heap().allocate<TransformStreamDefaultController>(realm, realm);
