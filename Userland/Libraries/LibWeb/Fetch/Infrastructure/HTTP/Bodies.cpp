@@ -5,12 +5,15 @@
  */
 
 #include <LibJS/Runtime/PromiseCapability.h>
+#include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/Fetch/BodyInit.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Bodies.h>
 #include <LibWeb/Fetch/Infrastructure/Task.h>
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
 #include <LibWeb/Streams/AbstractOperations.h>
+#include <LibWeb/Streams/ReadableStream.h>
+#include <LibWeb/Streams/ReadableStreamDefaultReader.h>
 #include <LibWeb/WebIDL/Promise.h>
 
 namespace Web::Fetch::Infrastructure {
@@ -64,43 +67,40 @@ JS::NonnullGCPtr<Body> Body::clone(JS::Realm& realm)
 // https://fetch.spec.whatwg.org/#body-fully-read
 void Body::fully_read(JS::Realm& realm, Web::Fetch::Infrastructure::Body::ProcessBodyCallback process_body, Web::Fetch::Infrastructure::Body::ProcessBodyErrorCallback process_body_error, TaskDestination task_destination) const
 {
+    HTML::TemporaryExecutionContext execution_context { Bindings::host_defined_environment_settings_object(realm), HTML::TemporaryExecutionContext::CallbacksEnabled::Yes };
+
     // FIXME: 1. If taskDestination is null, then set taskDestination to the result of starting a new parallel queue.
     // FIXME: Handle 'parallel queue' task destination
     VERIFY(!task_destination.has<Empty>());
     auto task_destination_object = task_destination.get<JS::NonnullGCPtr<JS::Object>>();
 
     // 2. Let successSteps given a byte sequence bytes be to queue a fetch task to run processBody given bytes, with taskDestination.
-    auto success_steps = [&realm, process_body, task_destination_object = task_destination_object](ReadonlyBytes bytes) -> ErrorOr<void> {
-        // Make a copy of the bytes, as the source of the bytes may disappear between the time the task is queued and executed.
-        auto bytes_copy = TRY(ByteBuffer::copy(bytes));
-        queue_fetch_task(*task_destination_object, JS::create_heap_function(realm.heap(), [process_body, bytes_copy = move(bytes_copy)]() mutable {
-            process_body->function()(move(bytes_copy));
+    auto success_steps = [&realm, process_body, task_destination_object](ByteBuffer bytes) {
+        queue_fetch_task(*task_destination_object, JS::create_heap_function(realm.heap(), [process_body, bytes = move(bytes)]() mutable {
+            process_body->function()(move(bytes));
         }));
-        return {};
     };
 
     // 3. Let errorSteps optionally given an exception exception be to queue a fetch task to run processBodyError given exception, with taskDestination.
-    auto error_steps = [&realm, process_body_error, task_destination_object](JS::GCPtr<WebIDL::DOMException> exception) {
+    auto error_steps = [&realm, process_body_error, task_destination_object](JS::Value exception) {
         queue_fetch_task(*task_destination_object, JS::create_heap_function(realm.heap(), [process_body_error, exception]() {
             process_body_error->function()(exception);
         }));
     };
 
     // 4. Let reader be the result of getting a reader for body’s stream. If that threw an exception, then run errorSteps with that exception and return.
+    auto result = m_stream->get_reader();
+
+    if (result.is_error()) {
+        error_steps(Bindings::dom_exception_to_throw_completion(realm.vm(), result.release_error()).release_value().value());
+        return;
+    }
+
+    // We know this is a ReadableStreamDefaultReader due to using default parameters in the call to get_reader() above.
+    auto reader = result.value().get<JS::NonnullGCPtr<Streams::ReadableStreamDefaultReader>>();
+
     // 5. Read all bytes from reader, given successSteps and errorSteps.
-    // FIXME: Use streams for these steps.
-    m_source.visit(
-        [&](ByteBuffer const& byte_buffer) {
-            if (auto result = success_steps(byte_buffer); result.is_error())
-                error_steps(WebIDL::UnknownError::create(realm, "Out-of-memory"_fly_string));
-        },
-        [&](JS::Handle<FileAPI::Blob> const& blob) {
-            if (auto result = success_steps(blob->bytes()); result.is_error())
-                error_steps(WebIDL::UnknownError::create(realm, "Out-of-memory"_fly_string));
-        },
-        [&](Empty) {
-            error_steps(WebIDL::DOMException::create(realm, "DOMException"_fly_string, "Reading from Blob, FormData or null source is not yet implemented"_fly_string));
-        });
+    reader->read_all_bytes(move(success_steps), move(error_steps));
 }
 
 // https://fetch.spec.whatwg.org/#byte-sequence-as-a-body
