@@ -165,7 +165,7 @@ void writable_stream_default_controller_process_write(WritableStreamDefaultContr
 void writable_stream_default_controller_write(WritableStreamDefaultController&, JS::Value chunk, JS::Value chunk_size);
 
 void initialize_transform_stream(TransformStream&, JS::NonnullGCPtr<JS::PromiseCapability> start_promise, double writable_high_water_mark, JS::NonnullGCPtr<SizeAlgorithm> writable_size_algorithm, double readable_high_water_mark, JS::NonnullGCPtr<SizeAlgorithm> readable_size_algorithm);
-void set_up_transform_stream_default_controller(TransformStream&, TransformStreamDefaultController&, JS::NonnullGCPtr<TransformAlgorithm>, JS::NonnullGCPtr<FlushAlgorithm>);
+void set_up_transform_stream_default_controller(TransformStream&, TransformStreamDefaultController&, JS::NonnullGCPtr<TransformAlgorithm>, JS::NonnullGCPtr<FlushAlgorithm>, JS::NonnullGCPtr<CancelAlgorithm>);
 void set_up_transform_stream_default_controller_from_transformer(TransformStream&, JS::Value transformer, Transformer&);
 void transform_stream_default_controller_clear_algorithms(TransformStreamDefaultController&);
 WebIDL::ExceptionOr<void> transform_stream_default_controller_enqueue(TransformStreamDefaultController&, JS::Value chunk);
@@ -175,10 +175,12 @@ JS::NonnullGCPtr<WebIDL::Promise> transform_stream_default_controller_perform_tr
 JS::NonnullGCPtr<WebIDL::Promise> transform_stream_default_sink_abort_algorithm(TransformStream&, JS::Value reason);
 JS::NonnullGCPtr<WebIDL::Promise> transform_stream_default_sink_close_algorithm(TransformStream&);
 JS::NonnullGCPtr<WebIDL::Promise> transform_stream_default_sink_write_algorithm(TransformStream&, JS::Value chunk);
+JS::NonnullGCPtr<WebIDL::Promise> transform_stream_default_source_cancel_algorithm(TransformStream& stream, JS::Value reason);
 JS::NonnullGCPtr<WebIDL::Promise> transform_stream_default_source_pull_algorithm(TransformStream&);
 void transform_stream_error(TransformStream&, JS::Value error);
 void transform_stream_error_writable_and_unblock_write(TransformStream&, JS::Value error);
 void transform_stream_set_backpressure(TransformStream&, bool backpressure);
+void transform_stream_unblock_write(TransformStream&);
 
 bool is_non_negative_number(JS::Value);
 bool can_transfer_array_buffer(JS::ArrayBuffer const& array_buffer);

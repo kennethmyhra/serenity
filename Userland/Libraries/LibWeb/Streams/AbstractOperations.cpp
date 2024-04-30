@@ -4547,12 +4547,9 @@ void initialize_transform_stream(TransformStream& stream, JS::NonnullGCPtr<JS::P
     });
 
     // 7. Let cancelAlgorithm be the following steps, taking a reason argument:
-    auto cancel_algorithm = JS::create_heap_function(realm.heap(), [&stream, &realm](JS::Value reason) {
-        // 1. Perform ! TransformStreamErrorWritableAndUnblockWrite(stream, reason).
-        transform_stream_error_writable_and_unblock_write(stream, reason);
-
-        // 2. Return a promise resolved with undefined.
-        return WebIDL::create_resolved_promise(realm, JS::js_undefined());
+    auto cancel_algorithm = JS::create_heap_function(realm.heap(), [&stream](JS::Value reason) {
+        // 1. Return ! TransformStreamDefaultSourceCancelAlgorithm(stream, reason).
+        return transform_stream_default_source_cancel_algorithm(stream, reason);
     });
 
     // 8. Set stream.[[readable]] to ! CreateReadableStream(startAlgorithm, pullAlgorithm, cancelAlgorithm, readableHighWaterMark, readableSizeAlgorithm).
@@ -4570,7 +4567,7 @@ void initialize_transform_stream(TransformStream& stream, JS::NonnullGCPtr<JS::P
 }
 
 // https://streams.spec.whatwg.org/#set-up-transform-stream-default-controller
-void set_up_transform_stream_default_controller(TransformStream& stream, TransformStreamDefaultController& controller, JS::NonnullGCPtr<TransformAlgorithm> transform_algorithm, JS::NonnullGCPtr<FlushAlgorithm> flush_algorithm)
+void set_up_transform_stream_default_controller(TransformStream& stream, TransformStreamDefaultController& controller, JS::NonnullGCPtr<TransformAlgorithm> transform_algorithm, JS::NonnullGCPtr<FlushAlgorithm> flush_algorithm, JS::NonnullGCPtr<CancelAlgorithm> cancel_algorithm)
 {
     // 1. Assert: stream implements TransformStream.
     // 2. Assert: stream.[[controller]] is undefined.
@@ -4587,6 +4584,9 @@ void set_up_transform_stream_default_controller(TransformStream& stream, Transfo
 
     // 6. Set controller.[[flushAlgorithm]] to flushAlgorithm.
     controller.set_flush_algorithm(flush_algorithm);
+
+    // 7. Set controller.[[cancelAlgorithm]] to cancelAlgorithm.
+    controller.set_cancel_algorithm(cancel_algorithm);
 }
 
 // https://streams.spec.whatwg.org/#set-up-transform-stream-default-controller-from-transformer
@@ -4618,7 +4618,12 @@ void set_up_transform_stream_default_controller_from_transformer(TransformStream
         return WebIDL::create_resolved_promise(realm, JS::js_undefined());
     });
 
-    // 4. If transformerDict["transform"] exists, set transformAlgorithm to an algorithm which takes an argument chunk
+    // 4. Let cancelAlgorithm be an algorithm which returns a promise resolved with undefined.
+    auto cancel_algorith = JS::create_heap_function(realm.heap(), [&realm](JS::Value) {
+        return WebIDL::create_resolved_promise(realm, JS::js_undefined());
+    });
+
+    // 5. If transformerDict["transform"] exists, set transformAlgorithm to an algorithm which takes an argument chunk
     //    and returns the result of invoking transformerDict["transform"] with argument list « chunk, controller » and
     //    callback this value transformer.
     if (transformer_dict.transform) {
@@ -4629,7 +4634,7 @@ void set_up_transform_stream_default_controller_from_transformer(TransformStream
         });
     }
 
-    // 5. If transformerDict["flush"] exists, set flushAlgorithm to an algorithm which returns the result of invoking
+    // 6. If transformerDict["flush"] exists, set flushAlgorithm to an algorithm which returns the result of invoking
     //    transformerDict["flush"] with argument list « controller » and callback this value transformer.
     if (transformer_dict.flush) {
         flush_algorithm = JS::create_heap_function(realm.heap(), [&realm, transformer, callback = transformer_dict.flush, controller]() {
@@ -4639,8 +4644,18 @@ void set_up_transform_stream_default_controller_from_transformer(TransformStream
         });
     }
 
-    // 6. Perform ! SetUpTransformStreamDefaultController(stream, controller, transformAlgorithm, flushAlgorithm).
-    set_up_transform_stream_default_controller(stream, *controller, transform_algorithm, flush_algorithm);
+    // 7. If transformerDict["cancel"] exists, set cancelAlgorithm to an algorithm which takes an argument reason and returns
+    // the result of invoking transformerDict["cancel"] with argument list « reason » and callback this value transformer.
+    if (transformer_dict.cancel) {
+        cancel_algorith = JS::create_heap_function(realm.heap(), [&realm, transformer, callback = transformer_dict.cancel](JS::Value reason) {
+            // Note: callback return a promise, so invoke_callback will never return an abrupt completion
+            auto result = MUST(WebIDL::invoke_callback(*callback, transformer, reason)).release_value();
+            return WebIDL::create_resolved_promise(realm, result);
+        });
+    }
+
+    // 8. Perform ! SetUpTransformStreamDefaultController(stream, controller, transformAlgorithm, flushAlgorithm, cancelAlgorithm).
+    set_up_transform_stream_default_controller(stream, *controller, transform_algorithm, flush_algorithm, cancel_algorith);
 }
 
 // https://streams.spec.whatwg.org/#transform-stream-default-controller-clear-algorithms
@@ -4868,6 +4883,66 @@ JS::NonnullGCPtr<WebIDL::Promise> transform_stream_default_source_pull_algorithm
     return JS::NonnullGCPtr { *stream.backpressure_change_promise() };
 }
 
+// https://streams.spec.whatwg.org/#transform-stream-default-source-cancel
+JS::NonnullGCPtr<WebIDL::Promise> transform_stream_default_source_cancel_algorithm(TransformStream& stream, JS::Value reason)
+{
+    auto& realm = stream.realm();
+
+    // 1. Let controller be stream.[[controller]].
+    auto controller = stream.controller();
+    VERIFY(controller);
+
+    // 2. If controller.[[finishPromise]] is not undefined, return controller.[[finishPromise]].
+    if (controller->finish_promise())
+        return JS::NonnullGCPtr { *controller->finish_promise() };
+
+    // 3. Let writable be stream.[[writable]].
+    auto writable = stream.writable();
+
+    // 4. Let controller.[[finishPromise]] be a new promise.
+    controller->set_finish_promise(WebIDL::create_promise(realm));
+
+    // 5. Let cancelPromise be the result of performing controller.[[cancelAlgorithm]], passing reason.
+    auto cancel_promise = controller->cancel_algorithm()->function()(reason);
+
+    // 6. Perform ! TransformStreamDefaultControllerClearAlgorithms(controller).
+    transform_stream_default_controller_clear_algorithms(*controller);
+
+    // 7. React to cancelPromise:
+    WebIDL::react_to_promise(
+        *cancel_promise,
+        // 1. If cancelPromise was fulfilled, then:
+        JS::create_heap_function(realm.heap(), [&realm, writable, controller, &stream](JS::Value reason) -> WebIDL::ExceptionOr<JS::Value> {
+            // 1. If writable.[[state]] is "errored", reject controller.[[finishPromise]] with writable.[[storedError]].
+            if (writable->state() == WritableStream::State::Errored) {
+                WebIDL::reject_promise(realm, *controller->finish_promise(), writable->stored_error());
+            }
+            // 2. Otherwise:
+            else {
+                // 1. Perform ! WritableStreamDefaultControllerErrorIfNeeded(writable.[[controller]], reason).
+                writable_stream_default_controller_error_if_needed(*writable->controller(), reason);
+                // 2. Perform ! TransformStreamUnblockWrite(stream).
+                transform_stream_unblock_write(stream);
+                // 3. Resolve controller.[[finishPromise]] with undefined.
+                WebIDL::resolve_promise(realm, *controller->finish_promise(), JS::js_undefined());
+            }
+            return JS::js_undefined();
+        }),
+        // 2. If cancelPromise was rejected with reason r, then:
+        JS::create_heap_function(realm.heap(), [&realm, writable, &stream, controller](JS::Value reason) -> WebIDL::ExceptionOr<JS::Value> {
+            // 1. Perform ! WritableStreamDefaultControllerErrorIfNeeded(writable.[[controller]], r).
+            writable_stream_default_controller_error_if_needed(*writable->controller(), reason);
+            // 2. Perform ! TransformStreamUnblockWrite(stream).
+            transform_stream_unblock_write(stream);
+            // 3. Reject controller.[[finishPromise]] with r.
+            WebIDL::reject_promise(realm, *controller->finish_promise(), reason);
+            return JS::js_undefined();
+        }));
+
+    // 8. Return controller.[[finishPromise]].
+    return JS::NonnullGCPtr { *controller->finish_promise() };
+}
+
 // https://streams.spec.whatwg.org/#transform-stream-error
 void transform_stream_error(TransformStream& stream, JS::Value error)
 {
@@ -4913,6 +4988,14 @@ void transform_stream_set_backpressure(TransformStream& stream, bool backpressur
 
     // 4. Set stream.[[backpressure]] to backpressure.
     stream.set_backpressure(backpressure);
+}
+
+// https://streams.spec.whatwg.org/#transform-stream-unblock-write
+void transform_stream_unblock_write(TransformStream& stream)
+{
+    // 1. If stream.[[backpressure]] is true, perform ! TransformStreamSetBackpressure(stream, false).
+    if (stream.backpressure().has_value() && stream.backpressure().value())
+        transform_stream_set_backpressure(stream, false);
 }
 
 // https://streams.spec.whatwg.org/#is-non-negative-number

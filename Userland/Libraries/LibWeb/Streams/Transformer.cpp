@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Kenneth Myhra <kennethmyhra@serenityos.org>
+ * Copyright (c) 2023-2024, Kenneth Myhra <kennethmyhra@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -22,6 +22,7 @@ JS::ThrowCompletionOr<Transformer> Transformer::from_value(JS::VM& vm, JS::Value
         .start = TRY(property_to_callback(vm, value, "start", WebIDL::OperationReturnsPromise::No)),
         .transform = TRY(property_to_callback(vm, value, "transform", WebIDL::OperationReturnsPromise::Yes)),
         .flush = TRY(property_to_callback(vm, value, "flush", WebIDL::OperationReturnsPromise::Yes)),
+        .cancel = TRY(property_to_callback(vm, value, "cancel", WebIDL::OperationReturnsPromise::Yes)),
         .readable_type = {},
         .writable_type = {},
     };

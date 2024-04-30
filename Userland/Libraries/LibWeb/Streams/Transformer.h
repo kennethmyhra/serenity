@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Kenneth Myhra <kennethmyhra@serenityos.org>
+ * Copyright (c) 2023-2024, Kenneth Myhra <kennethmyhra@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -20,6 +20,8 @@ struct Transformer {
     JS::Handle<WebIDL::CallbackType> transform;
     // https://streams.spec.whatwg.org/#dom-transformer-flush
     JS::Handle<WebIDL::CallbackType> flush;
+    // https://streams.spec.whatwg.org/#dom-transformer-cancel
+    JS::Handle<WebIDL::CallbackType> cancel;
 
     // https://streams.spec.whatwg.org/#dom-transformer-readabletype
     Optional<JS::Value> readable_type;
