@@ -6,6 +6,7 @@
  */
 
 #include <LibJS/Runtime/Completion.h>
+#include <LibJS/Runtime/TypedArray.h>
 #include <LibWeb/DOMURL/URLSearchParams.h>
 #include <LibWeb/Fetch/BodyInit.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Bodies.h>
@@ -137,7 +138,17 @@ WebIDL::ExceptionOr<Infrastructure::BodyWithType> extract_body(JS::Realm& realm,
         length = source.get<ByteBuffer>().size();
 
     // FIXME: 12. If action is non-null, then run these steps in parallel:
-
+    if (source.has<ByteBuffer>()) {
+        // FIXME: 1. Run action.
+        dbgln("In FIXME: 12. If action is non-null, then run these steps in parallel:");
+        // Whenever one or more bytes are available and stream is not errored, enqueue the result of creating a Uint8Array from the available bytes into stream.
+        auto byte_buffer = source.get<ByteBuffer>();
+        auto chunk = TRY(JS::Uint8Array::create(realm, *length));
+        chunk->viewed_array_buffer()->buffer().overwrite(0, byte_buffer.data(), *length);
+        TRY(Streams::readable_stream_enqueue(*stream->controller(), chunk));
+        // When running action is done, close stream.
+        // Streams::readable_stream_close(*stream);
+    }
     // 13. Let body be a body whose stream is stream, source is source, and length is length.
     auto body = Infrastructure::Body::create(vm, *stream, move(source), move(length));
 
